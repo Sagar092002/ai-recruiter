@@ -1,0 +1,5 @@
+langchain-ollama
+streamlit
+pdfplumber
+python-dotenv
+pymongo
