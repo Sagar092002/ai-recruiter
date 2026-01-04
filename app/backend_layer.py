@@ -4,7 +4,7 @@ import secrets
 import string
 from app.db import candidates_collection
 
-QUIZ_BASE_URL = "http://localhost:8501/?token="
+QUIZ_BASE_URL = "https://ai-recruiter-859z6bd6jfqfxufktu79e9.streamlit.app/?token="
 QUIZ_PDF_PATH = "uploads/quizzes/backend_quiz.pdf"
 
 EMAIL_REGEX = r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+"

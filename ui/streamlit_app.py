@@ -1310,7 +1310,7 @@ if "stored_candidates" in st.session_state:
             else:
                 st.markdown(f"**Email:** {candidate['email']}")
 
-            quiz_url = f"http://localhost:8501/?token={candidate['quiz_token']}"
+            quiz_url = f"https://ai-recruiter-859z6bd6jfqfxufktu79e9.streamlit.app/?token={candidate['quiz_token']}"
 
             st.markdown(f"**🔐 Password:** `{candidate['password']}`")
             st.markdown(f"**📝 Quiz Link:** {quiz_url}")
