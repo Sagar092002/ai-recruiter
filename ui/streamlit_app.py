@@ -25,7 +25,15 @@ from app.backend_layer import (
 )
 from app.frontend_layer import show_second_round_email, generate_offer_letter
 from app.email_service import send_email
-from app.db import candidates_collection
+from app.db import candidates_collection, assets_collection
+import base64
+
+def get_image_from_db(image_name):
+    """Fetch image binary from MongoDB and return base64 string"""
+    asset = assets_collection.find_one({"name": image_name})
+    if asset:
+        return base64.b64encode(asset["data"]).decode()
+    return ""
 
 # ============================================
 # GLOBAL CONFIG
@@ -729,14 +737,15 @@ div[data-testid="stFormSubmitButton"] button:hover {
 # ============================================
 # NAVBAR
 # ============================================
-from navbar_helper import get_base64_image
-
-LOGO_PATH = os.path.join(PROJECT_ROOT, "ui", "logo.png")
+# Fetch images from DB
+logo_b64 = get_image_from_db("logo")
+login_avatar_b64 = get_image_from_db("login_avatar")
+dashboard_b64 = get_image_from_db("dashboard_illustration")
 
 st.markdown(f"""
 <nav class="navbar">
 <div class="navbar-logo">
-<img src="data:image/png;base64,{get_base64_image(LOGO_PATH)}" alt="Logo">
+<img src="data:image/png;base64,{logo_b64}" alt="Logo">
 <span class="navbar-logo-text">AI Recruiter</span>
 </div>
 <input type="checkbox" id="nav-toggle" class="nav-toggle">
@@ -882,8 +891,8 @@ if token:
             st.markdown('</div>', unsafe_allow_html=True)
 
         with col2:
-            login_img_path = r"C:/Users/asus/.gemini/antigravity/brain/fc91c5b2-0984-4354-af74-6f4b718230a3/login_ai_avatar_1767498879681.png"
-            st.image(login_img_path, use_container_width=True)
+            if login_avatar_b64:
+                st.markdown(f'<img src="data:image/png;base64,{login_avatar_b64}" style="width: 100%; border-radius: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.5);">', unsafe_allow_html=True)
             st.markdown("""
                 <div style="text-align: center; margin-top: 25px; padding: 20px; border-top: 1px solid rgba(255,255,255,0.05);">
                     <h3 style="color: #ffffff; font-size: 1.4rem; font-weight: 700;">AI-Match Intelligence</h3>
@@ -1044,9 +1053,9 @@ if page == "about":
 
     with col_split2:
         st.markdown('<div class="visual-container">', unsafe_allow_html=True)
-        dashboard_img_path = r"C:/Users/asus/.gemini/antigravity/brain/6fbc6a3c-93c6-4de4-9527-b6c47074775c/enterprise_dashboard_illustration_1767372168013.png"
+        if dashboard_b64:
+            st.markdown(f'<img src="data:image/png;base64,{dashboard_b64}" style="width: 100%; border-radius: 30px; box-shadow: 0 50px 100px rgba(0,0,0,0.5);">', unsafe_allow_html=True)
         
-        st.image(dashboard_img_path, use_container_width=True)
         st.markdown("""
         <div style="margin-top: 25px; text-align: center;">
             <h4 style="color: #ffffff !important; margin-bottom: 8px; font-weight: 700;">Talent Analytics OS</h4>

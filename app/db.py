@@ -13,3 +13,4 @@ client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
 db = client[DB_NAME]
 
 candidates_collection = db["candidates"]
+assets_collection = db["assets"]
