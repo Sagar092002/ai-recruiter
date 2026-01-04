@@ -1,5 +1,6 @@
-langchain-ollama
+langchain-groq
 streamlit
 pdfplumber
 python-dotenv
 pymongo
+certifi

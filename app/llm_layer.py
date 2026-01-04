@@ -1,13 +1,19 @@
-from langchain_ollama import OllamaLLM
+import os
+from langchain_groq import ChatGroq
+from dotenv import load_dotenv
 
-llm = OllamaLLM(model="llama3", temperature=0.2)
+load_dotenv()
+
+# Initialize Groq LLM
+llm = ChatGroq(
+    temperature=0.2,
+    model_name="llama-3.3-70b-versatile", # High-performance model for ranking
+    groq_api_key=os.getenv("GROQ_API_KEY")
+)
 
 def rank_resumes(job_description: str, candidates: list[dict]) -> str:
     """
-    candidates = [
-        {"email": "...", "resume_text": "..."},
-        ...
-    ]
+    ranks candidates based on job description using Groq LLM
     """
 
     formatted_candidates = ""
@@ -50,4 +56,5 @@ Instructions:
 Do NOT add any explanations, markdown formatting, or text outside the JSON array.
 """
 
-    return llm.invoke(prompt)
+    response = llm.invoke(prompt)
+    return response.content
