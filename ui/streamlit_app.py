@@ -731,7 +731,7 @@ div[data-testid="stFormSubmitButton"] button:hover {
 # ============================================
 from navbar_helper import get_base64_image
 
-LOGO_PATH = r"C:/Users/asus/.gemini/antigravity/brain/3c7cbbca-9c5f-49b2-8770-3fc7dba0a253/recruitment_logo_1767452507640.png"
+LOGO_PATH = os.path.join(PROJECT_ROOT, "ui", "logo.png")
 
 st.markdown(f"""
 <nav class="navbar">
