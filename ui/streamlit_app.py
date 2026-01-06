@@ -1,6 +1,6 @@
 # ============================================
 # STREAMLIT FRONTEND – AI RECRUITER SYSTEM
-# (HR Dashboard + Candidate Login + Quiz)
+# (HR Dashboard + Candidate Login + Quiz) - Updated
 # ============================================
 
 # ---------- FIX PYTHON PATH ----------
@@ -25,8 +25,9 @@ from app.backend_layer import (
 )
 from app.frontend_layer import show_second_round_email, generate_offer_letter
 from app.email_service import send_email
-from app.db import candidates_collection, assets_collection
+from app.db import candidates_collection, assets_collection, recruiters_collection
 import base64
+import hashlib
 
 def get_image_from_db(image_name):
     """Fetch image binary from MongoDB and return base64 string"""
@@ -35,11 +36,22 @@ def get_image_from_db(image_name):
         return base64.b64encode(asset["data"]).decode()
     return ""
 
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def extract_text_from_pdf(file_path: str) -> str:
+    text = ""
+    with pdfplumber.open(file_path) as pdf:
+        for page in pdf.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+    return text
+
 # ============================================
 # GLOBAL CONFIG
 # ============================================
 UPLOAD_DIR = os.path.join(PROJECT_ROOT, "uploads", "resumes")
-QUIZ_PATH = os.path.join(PROJECT_ROOT, "uploads", "quizzes", "backend_quiz.pdf")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -742,6 +754,22 @@ logo_b64 = get_image_from_db("logo")
 login_avatar_b64 = get_image_from_db("login_avatar")
 dashboard_b64 = get_image_from_db("dashboard_illustration")
 
+# Handle Logout
+if st.query_params.get("action") == "logout":
+    st.session_state["recruiter_logged_in"] = False
+    st.session_state["recruiter_email"] = None
+    st.query_params.clear()
+    st.rerun()
+
+is_recruiter = st.session_state.get("recruiter_logged_in", False)
+recruiter_email = st.session_state.get("recruiter_email", "Recruiter")
+
+navbar_right_items = ""
+if is_recruiter:
+    navbar_right_items = f'<li><span style="color: #94a3b8; font-weight: 600; font-size: 0.9rem;">👋 {recruiter_email.split("@")[0]}</span></li><li><a href="/?action=logout" class="navbar-login-btn" style="background: rgba(239, 68, 68, 0.1) !important; color: #ef4444 !important; border: 1px solid rgba(239, 68, 68, 0.2) !important; box-shadow: none !important;" target="_self">Logout</a></li>'
+else:
+    navbar_right_items = '<li><a href="/?page=login" target="_self" style="color: #ffffff;">Login</a></li><li><a href="/?page=signup" class="navbar-login-btn" target="_self">Sign Up</a></li>'
+
 st.markdown(f"""
 <nav class="navbar">
 <div class="navbar-logo">
@@ -754,8 +782,9 @@ st.markdown(f"""
 </label>
 <ul class="navbar-menu">
 <li><a href="/?page=home" target="_self">Home</a></li>
+<li><a href="/?page=selected" target="_self">Selected</a></li>
 <li><a href="/?page=about" target="_self">About</a></li>
-<li><a href="/?page=home#login" class="navbar-login-btn" target="_self">Start Search</a></li>
+{navbar_right_items}
 </ul>
 </nav>
 """, unsafe_allow_html=True)
@@ -861,19 +890,21 @@ if token:
         col1, col2 = st.columns([1.1, 0.9], gap="large")
 
         with col1:
-            # st.markdown('<div class="premium-card">', unsafe_allow_html=True)
             st.markdown("""
-                <h1 style="font-family: 'Poppins', sans-serif; font-weight: 800; letter-spacing: -2px; margin-bottom: 10px;">
-                    🔐 <span style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Candidate Portal</span>
-                </h1>
-                <p style="color: #94a3b8; font-size: 1.1rem; margin-bottom: 40px;">Please authenticate to access your technical assessment.</p>
+                <div class="premium-card" style="padding: 50px; border-right: none; position: relative; overflow: hidden;">
+                    <div style="position: absolute; top: -50px; right: -50px; width: 150px; height: 150px; background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 70%);"></div>
+                    
+                    <h1 style="font-family: 'Outfit', sans-serif; font-weight: 800; letter-spacing: -1.5px; margin-bottom: 5px; font-size: 3rem;">
+                        🔐 <span style="background: linear-gradient(135deg, #818cf8 0%, #c084fc 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Assessment Entry</span>
+                    </h1>
+                    <p style="color: #94a3b8; font-size: 1.1rem; margin-bottom: 15px; letter-spacing: 0.2px;">Verify your credentials to unlock the technical challenge.</p>
             """, unsafe_allow_html=True)
 
-            email = st.text_input("Email Profile", placeholder="e.g. candidate@example.com").strip().lower()
-            password = st.text_input("Secure Access Key", type="password", placeholder="••••••••")
+            email = st.text_input("Registration Email", placeholder="e.g. candidate@domain.com").strip().lower()
+            password = st.text_input("Access Password", type="password", placeholder="••••••••")
             
-            st.markdown('<div style="margin-top: 30px;">', unsafe_allow_html=True)
-            if st.button("Enter Dashboard", use_container_width=True):
+            st.markdown('<div style="margin-top: 40px;">', unsafe_allow_html=True)
+            if st.button("Unlock Assessment", use_container_width=True):
                 candidate = candidates_collection.find_one({"quiz_token": token})
                 if candidate:
                     stored_email = candidate["email"].lower()
@@ -884,19 +915,33 @@ if token:
                         st.query_params["subpage"] = "quiz"
                         st.rerun()
                     else:
-                        st.error("❌ Identification failed. Please check your credentials.")
+                        st.error("❌ Credentials incorrect. Verification failed.")
                 else:
-                    st.error("❌ Session expired or invalid token.")
+                    st.error("❌ Session invalid. Link may have expired.")
             st.markdown('</div>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+            
+            st.markdown("""
+                <div style="margin-top: 35px; display: flex; align-items: center; gap: 15px; opacity: 0.6;">
+                    <div style="flex: 1; height: 1px; background: rgba(255,255,255,0.1);"></div>
+                    <span style="font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px;">Security Verified</span>
+                    <div style="flex: 1; height: 1px; background: rgba(255,255,255,0.1);"></div>
+                </div>
+                </div>
+            """, unsafe_allow_html=True)
 
         with col2:
             if login_avatar_b64:
-                st.markdown(f'<img src="data:image/png;base64,{login_avatar_b64}" style="width: 100%; border-radius: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.5);">', unsafe_allow_html=True)
+                st.markdown(f"""
+                    <div style="position: relative; padding: 20px;">
+                        <div style="position: absolute; inset: 0; background: linear-gradient(135deg, #6366f1 0%, transparent 100%); opacity: 0.1; border-radius: 40px;"></div>
+                        <img src="data:image/png;base64,{login_avatar_b64}" style="width: 100%; border-radius: 30px; box-shadow: 0 40px 80px rgba(0,0,0,0.6); position: relative; z-index: 1; border: 1px solid rgba(255,255,255,0.1);">
+                    </div>
+                """, unsafe_allow_html=True)
             st.markdown("""
-                <div style="text-align: center; margin-top: 25px; padding: 20px; border-top: 1px solid rgba(255,255,255,0.05);">
-                    <h3 style="color: #ffffff; font-size: 1.4rem; font-weight: 700;">AI-Match Intelligence</h3>
-                    <p style="color: #6366f1; font-weight: 600; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 2px;">Verification Layer Active</p>
+                <div style="text-align: center; margin-top: 35px; padding: 25px; background: rgba(255,255,255,0.02); border-radius: 20px; border: 1px solid rgba(255,255,255,0.05);">
+                    <h3 style="color: #ffffff; font-size: 1.5rem; font-weight: 700; margin-bottom: 5px;">AI Interaction Layer</h3>
+                    <p style="color: #818cf8; font-weight: 700; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 3px;">Biometric Verification Enabled</p>
+                    <p style="color: #94a3b8; font-size: 0.9rem; margin-top: 10px;">Ensuring a fair and secure assessment environment for all talent.</p>
                 </div>
             """, unsafe_allow_html=True)
 
@@ -990,6 +1035,11 @@ if token:
                     with st.spinner("Compiling final offer package..."):
                         current_user = candidates_collection.find_one({"quiz_token": token})
                         if current_user:
+                            # Update status in MongoDB
+                            candidates_collection.update_one(
+                                {"quiz_token": token},
+                                {"$set": {"status": "SELECTED", "quiz_score": final_score}}
+                            )
                             user_email = current_user["email"]
                             user_name = current_user["candidate"]
                             subject, body = generate_offer_letter(user_name)
@@ -1020,7 +1070,127 @@ if token:
 # ============================================
 st.markdown('<div class="main-content-wrapper">', unsafe_allow_html=True)
 
-if page == "about":
+if page == "login":
+    # ============================================
+    # RECRUITER LOGIN PAGE (SPLIT SCREEN - 50/50)
+    # ============================================
+    st.markdown('<div class="main-content-wrapper" style="padding: 0;">', unsafe_allow_html=True)
+    
+    col_form, col_img = st.columns([1, 1], gap="small")
+
+    with col_form:
+        st.markdown("""<div class="premium-card" style="padding: 50px; border-left: none; position: relative; overflow: hidden; margin-top: 50px;">
+<div style="position: absolute; top: -50px; left: -50px; width: 150px; height: 150px; background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 70%);"></div>
+<h1 style="font-family: 'Outfit', sans-serif; font-weight: 800; letter-spacing: -1.5px; margin-bottom: 5px; font-size: 3rem;">
+🔐 <span style="background: linear-gradient(135deg, #818cf8 0%, #c084fc 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Recruiter Login</span>
+</h1>
+<p style="color: #94a3b8; font-size: 1.1rem; margin-bottom: 15px; letter-spacing: 0.2px;">Enter your workspace credentials to access the engine.</p>""", unsafe_allow_html=True)
+        
+        with st.form("recruiter_login_form", border=False):
+            email = st.text_input("Workspace Email", placeholder="email@company.com").strip().lower()
+            password = st.text_input("Security Key", type="password", placeholder="••••••••")
+            login_btn = st.form_submit_button("Access Dashboard", use_container_width=True)
+            
+            if login_btn:
+                if not email or not password:
+                    st.error("Please fill in all fields.")
+                else:
+                    user = recruiters_collection.find_one({"email": email})
+                    if user and user["password"] == hash_password(password):
+                        st.session_state["recruiter_logged_in"] = True
+                        st.session_state["recruiter_email"] = email
+                        st.success("✅ Login successful!")
+                        st.query_params["page"] = "home"
+                        st.rerun()
+                    else:
+                        st.error("❌ Invalid email or password.")
+        
+        st.markdown('<p style="text-align: center; color: #94a3b8; margin-top: 30px;">Don\'t have an account? <a href="/?page=signup" style="color: #6366f1; text-decoration: none; font-weight: 600;">Sign Up</a></p>', unsafe_allow_html=True)
+        
+        st.markdown("""<div style="margin-top: 35px; display: flex; align-items: center; gap: 15px; opacity: 0.6;">
+<div style="flex: 1; height: 1px; background: rgba(255,255,255,0.1);"></div>
+<span style="font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px;">Admin Access Verified</span>
+<div style="flex: 1; height: 1px; background: rgba(255,255,255,0.1);"></div>
+</div></div>""", unsafe_allow_html=True)
+
+    with col_img:
+        st.markdown(f"""
+            <div style="height: 100vh; background: url('https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=2070&auto=format&fit=crop') center/cover; position: relative;">
+                <div style="position: absolute; inset: 0; background: linear-gradient(to left, transparent, #050505);"></div>
+                <div style="position: absolute; bottom: 50px; left: 50px; right: 50px;">
+                    <h2 style="color: white; font-size: 2.3rem; font-weight: 800; line-height: 1.2;">Secure Access <br><span style="color: #6366f1;">to Talent Intelligence.</span></h2>
+                    <p style="color: #94a3b8; font-size: 1rem; margin-top: 20px;">The command center for modern recruiter-first automation.</p>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.stop()
+
+elif page == "signup":
+    # ============================================
+    # RECRUITER SIGN UP PAGE (SPLIT SCREEN - 50/50)
+    # ============================================
+    st.markdown('<div class="main-content-wrapper" style="padding: 0;">', unsafe_allow_html=True)
+    
+    col_form, col_img = st.columns([1, 1], gap="small")
+
+    with col_form:
+        st.markdown("""<div class="premium-card" style="padding: 50px; border-left: none; position: relative; overflow: hidden; margin-top: 50px;">
+<div style="position: absolute; top: -50px; left: -50px; width: 150px; height: 150px; background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 70%);"></div>
+<h1 style="font-family: 'Outfit', sans-serif; font-weight: 800; letter-spacing: -1.5px; margin-bottom: 5px; font-size: 3rem;">
+🚀 <span style="background: linear-gradient(135deg, #818cf8 0%, #c084fc 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Recruiter Signup</span>
+</h1>
+<p style="color: #94a3b8; font-size: 1.1rem; margin-bottom: 15px; letter-spacing: 0.2px;">Join the elite network of automated talent scouting.</p>""", unsafe_allow_html=True)
+        
+        with st.form("recruiter_signup_form", border=False):
+            name = st.text_input("Full Name", placeholder="John Doe")
+            email = st.text_input("Work Email", placeholder="email@company.com").strip().lower()
+            password = st.text_input("Create Password", type="password", placeholder="••••••••")
+            confirm_password = st.text_input("Confirm Password", type="password", placeholder="••••••••")
+            signup_btn = st.form_submit_button("Register Account", use_container_width=True)
+            
+            if signup_btn:
+                if not email or not password or not name:
+                    st.error("Please fill in all fields.")
+                elif password != confirm_password:
+                    st.error("Passwords do not match.")
+                elif recruiters_collection.find_one({"email": email}):
+                    st.error("An account with this email already exists.")
+                else:
+                    recruiters_collection.insert_one({
+                        "name": name,
+                        "email": email,
+                        "password": hash_password(password),
+                        "role": "recruiter"
+                    })
+                    st.success("✅ Registration successful!")
+                    st.query_params["page"] = "login"
+                    st.rerun()
+
+        st.markdown('<p style="text-align: center; color: #94a3b8; margin-top: 30px;">Already have an account? <a href="/?page=login" style="color: #6366f1; text-decoration: none; font-weight: 600;">Login</a></p>', unsafe_allow_html=True)
+        
+        st.markdown("""<div style="margin-top: 35px; display: flex; align-items: center; gap: 15px; opacity: 0.6;">
+<div style="flex: 1; height: 1px; background: rgba(255,255,255,0.1);"></div>
+<span style="font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px;">Partner Verified</span>
+<div style="flex: 1; height: 1px; background: rgba(255,255,255,0.1);"></div>
+</div></div>""", unsafe_allow_html=True)
+
+    with col_img:
+        st.markdown(f"""
+            <div style="height: 100vh; background: url('https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=80&w=2070&auto=format&fit=crop') center/cover; position: relative;">
+                <div style="position: absolute; inset: 0; background: linear-gradient(to left, transparent, #050505);"></div>
+                <div style="position: absolute; bottom: 50px; left: 50px; right: 50px;">
+                    <h2 style="color: white; font-size: 2.3rem; font-weight: 800; line-height: 1.2;">Join the Future <br><span style="color: #6366f1;">of Recruitment.</span></h2>
+                    <p style="color: #94a3b8; font-size: 1rem; margin-top: 20px;">Start automating your talent pipeline with elite AI accuracy.</p>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.stop()
+
+elif page == "about":
     # ============================================
     # ABOUT PAGE: THE FUTURE OF AUTOMATION
     # ============================================
@@ -1067,6 +1237,118 @@ if page == "about":
     
     st.markdown('</div>', unsafe_allow_html=True) # Close main-content
     st.stop() # Exclusive view for About page
+elif page == "selected":
+    # ============================================
+    # SELECTED CANDIDATES PAGE (ENHANCED)
+    # ============================================
+    st.markdown('<div class="main-content">', unsafe_allow_html=True)
+    st.markdown('<h2 class="section-title">Hired Talent</h2>', unsafe_allow_html=True)
+    st.markdown('<p style="text-align: center; color: #94a3b8; margin-bottom: 60px; font-size: 1.1rem;">The elite pool of candidates who cleared the AI Technical Assessment with exceptional scores.</p>', unsafe_allow_html=True)
+    
+    # CSS for premium grid cards
+    st.markdown("""
+    <style>
+        .talents-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 25px;
+            padding: 20px 0;
+            width: 100%;
+        }
+        .talent-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 24px;
+            padding: 30px;
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            position: relative;
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+            aspect-ratio: 1 / 1; /* Force square shape */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .talent-card:hover {
+            transform: translateY(-10px) scale(1.02);
+            border-color: #6366f1;
+            background: rgba(99, 102, 241, 0.05);
+            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4), 0 0 20px rgba(99, 102, 241, 0.1);
+        }
+        .talent-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: linear-gradient(to bottom, #10b981, #6366f1);
+            opacity: 0.6;
+        }
+        .talent-avatar {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #6366f1, #10b981);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            color: white;
+            font-weight: 700;
+            margin-bottom: 20px;
+        }
+        .score-badge {
+            position: absolute;
+            top: 30px;
+            right: 30px;
+            background: rgba(16, 185, 129, 0.1);
+            color: #10b981;
+            padding: 6px 14px;
+            border-radius: 50px;
+            font-weight: 800;
+            font-size: 0.85rem;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+        .talent-info h3 { margin: 0; font-size: 1.4rem; color: #ffffff; }
+        .talent-info p { margin: 5px 0 0 0; color: #94a3b8; font-size: 0.95rem; }
+        .talent-footer { margin-top: 25px; display: flex; align-items: center; gap: 10px; color: #10b981; font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Fetch from DB
+    selected_list = list(candidates_collection.find({"status": "SELECTED"}).sort("quiz_score", -1))
+    
+    if not selected_list:
+        st.markdown("""
+            <div style="text-align: center; padding: 100px 20px; background: rgba(255,255,255,0.02); border-radius: 30px; border: 1px dashed rgba(255,255,255,0.1);">
+                <h3 style="color: #6366f1;">No Selection Data Yet</h3>
+                <p style="color: #94a3b8;">Candidates will appear here once they complete and excel in the technical quiz.</p>
+            </div>
+        """, unsafe_allow_html=True)
+    else:
+        # Build the entire grid as a single HTML string to prevent Streamlit's layout engine from breaking the grid
+        grid_html = '<div class="talents-grid">'
+        for c in selected_list:
+            initial = c['candidate'][0].upper() if c['candidate'] else "C"
+            grid_html += f"""
+            <div class="talent-card">
+                <div class="score-badge">{c.get('quiz_score', 0)}% MATCH</div>
+                <div class="talent-avatar">{initial}</div>
+                <div class="talent-info">
+                    <h3>{c['candidate']}</h3>
+                    <p>📧 {c['email']}</p>
+                </div>
+                <div class="talent-footer">
+                    <span>✓ VERIFIED TECHNICAL ELITE</span>
+                </div>
+            </div>
+            """
+        grid_html += '</div>'
+        st.markdown(grid_html, unsafe_allow_html=True)
+            
+    st.markdown('</div>', unsafe_allow_html=True) # Close main-content
+    st.stop()
 else:
     # ============================================
     # HOME PAGE: HERO SECTION + FORM
@@ -1097,255 +1379,268 @@ else:
     """, unsafe_allow_html=True)
 
     # --------------------------------------------
-    # RECRUITMENT FORM SECTION
+    # RECRUITMENT FORM SECTION (RESTRICTED)
     # --------------------------------------------
     st.markdown('<div class="form-section" id="login">', unsafe_allow_html=True)
     st.markdown('<span class="form-step-label">AI Recruiter Engine</span>', unsafe_allow_html=True)
     st.markdown('<h2 class="form-title">Start Your Search</h2>', unsafe_allow_html=True)
 
-# Form inside the card
-job_description = st.text_area(
-    "1. Define Target Role & Requirements",
-    height=180,
-    placeholder="e.g. Senior Backend Engineer with Expertise in Python, MongoDB and AI...",
-    label_visibility="visible"
-)
-
-st.markdown('<div style="margin: 30px 0;"></div>', unsafe_allow_html=True) 
-
-col_f1, col_f2 = st.columns([2, 1], gap="medium")
-with col_f1:
-    uploaded_files = st.file_uploader(
-        "2. Candidate Pool (Upload PDF Resumes)",
-        type=["pdf"],
-        accept_multiple_files=True,
-        label_visibility="visible"
-    )
-with col_f2:
-    min_candidates = st.number_input(
-        "3. Selection Limit",
-        min_value=1,
-        max_value=50,
-        value=3,
-        step=1,
-        help="How many top candidates to extract?"
-    )
-
-st.markdown('<div class="submit-container">', unsafe_allow_html=True)
-process_clicked = st.button("🚀 Analyze & Match Talent", key="form_process_btn", use_container_width=False)
-st.markdown('</div>', unsafe_allow_html=True)
-
-# st.markdown('</div>', unsafe_allow_html=True) # Close form-card
-st.markdown('</div>', unsafe_allow_html=True) # Close form-section
-
-# ============================================
-# HELPER FUNCTIONS
-# ============================================
-def extract_text_from_pdf(file_path: str) -> str:
-    text = ""
-    with pdfplumber.open(file_path) as pdf:
-        for page in pdf.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text += page_text + "\n"
-    return text
-
-# ============================================
-# PROCESSING LOGIC (Executed if button clicked)
-# ============================================
-if process_clicked:
-    if not job_description.strip():
-        st.error("❌ Job description is required.")
-       
-    elif not uploaded_files:
-        st.error("❌ Please upload at least one resume.")
-        
+    if not is_recruiter:
+        st.markdown("""
+            <div style="background: rgba(255, 255, 255, 0.03); border: 1px dashed rgba(99, 102, 241, 0.4); border-radius: 24px; padding: 60px 40px; text-align: center; max-width: 800px; margin: 0 auto;">
+                <h3 style="color: #ffffff; margin-bottom: 15px;">Authentication Required</h3>
+                <p style="color: #94a3b8; font-size: 1.1rem; line-height: 1.6; margin-bottom: 30px;">
+                    The Recruitment Engine is restricted to verified HR personnel. 
+                    Please sign in to access candidate parsing and ranking features.
+                </p>
+                <div style="display: flex; justify-content: center; gap: 20px;">
+                    <a href="/?page=login" target="_self" style="text-decoration: none; background: #6366f1; color: white; padding: 12px 30px; border-radius: 50px; font-weight: 700; transition: all 0.3s ease;">Login to Engine</a>
+                    <a href="/?page=signup" target="_self" style="text-decoration: none; background: rgba(255,255,255,0.05); color: white; border: 1px solid rgba(255,255,255,0.1); padding: 12px 30px; border-radius: 50px; font-weight: 700;">Create Account</a>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
     else:
-        # ----------------------------------------
-        # SAVE & READ RESUMES
-        # ----------------------------------------
-        resume_texts = []
+        # Form inside the card
+        job_description = st.text_area(
+            "1. Define Target Role & Requirements",
+            height=180,
+            placeholder="e.g. Senior Backend Engineer with Expertise in Python, MongoDB and AI...",
+            label_visibility="visible"
+        )
 
-        with st.spinner("📄 Reading resumes..."):
-            for file in uploaded_files:
-                file_path = os.path.join(UPLOAD_DIR, file.name)
-                with open(file_path, "wb") as f:
-                    f.write(file.read())
+        st.markdown('<div style="margin: 30px 0;"></div>', unsafe_allow_html=True) 
 
-                resume_texts.append(extract_text_from_pdf(file_path))
-
-        # ----------------------------------------
-        # BACKEND: EMAIL EXTRACTION
-        # ----------------------------------------
-        with st.spinner("📧 Extracting emails from resumes..."):
-            processed_resumes = process_uploaded_resumes(resume_texts)
-
-        # ----------------------------------------
-        # LLM: RANKING
-        # ----------------------------------------
-        with st.spinner("🧠 AI is ranking candidates..."):
-            ai_output = rank_resumes(
-                job_description=job_description,
-                candidates=processed_resumes
+        col_f1, col_f2 = st.columns([2, 1], gap="medium")
+        with col_f1:
+            uploaded_files = st.file_uploader(
+                "2. Candidate Pool (Upload PDF Resumes)",
+                type=["pdf"],
+                accept_multiple_files=True,
+                label_visibility="visible"
+            )
+        with col_f2:
+            min_candidates = st.number_input(
+                "3. Selection Limit",
+                min_value=1,
+                max_value=50,
+                value=3,
+                step=1,
+                help="How many top candidates to extract?"
             )
 
-        # ----------------------------------------
-        # BACKEND: SHORTLIST
-        # ----------------------------------------
-        with st.spinner("🎯 Selecting top candidates..."):
-            shortlisted = select_top_candidates(
-                ai_output=ai_output,
-                min_candidates=min_candidates
-            )
+        st.markdown('<div class="submit-container">', unsafe_allow_html=True)
+        process_clicked = st.button("🚀 Analyze & Match Talent", key="form_process_btn", use_container_width=False)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        # ----------------------------------------
-        # STORE IN MONGODB
-        # ----------------------------------------
-        with st.spinner("💾 Storing shortlisted candidates in MongoDB..."):
-            stored_candidates = store_shortlisted_candidates(shortlisted)
+        st.markdown('</div>', unsafe_allow_html=True) # Close form-section
 
-        st.session_state["stored_candidates"] = stored_candidates
-        st.success("✅ Candidates shortlisted and stored!")
-
-# ============================================
-# DISPLAY SHORTLISTED CANDIDATES (Full Width below columns)
-# ============================================
-if "stored_candidates" in st.session_state:
-    st.write("")  # Spacer
-    
-    candidates = st.session_state["stored_candidates"]
-
-    # ---------- DEBUG MODE ----------
-    with st.sidebar:
-        st.header("🛠️ Debug Mode")
-        target_email = st.text_input("Override email (testing)")
-        override = st.checkbox("Enable override")
-
-    display_candidates = []
-
-    for c in candidates:
-        c_copy = copy.deepcopy(c)
-        if override and target_email:
-            c_copy["original_email"] = c_copy["email"]
-            c_copy["email"] = target_email
-        display_candidates.append(c_copy)
-
-    # st.markdown('<div class="form-card">', unsafe_allow_html=True)
-    
-    st.markdown("""
-    <div style="text-align: center; margin-bottom: 40px;">
-        <h2 style="font-family: 'Poppins', sans-serif; font-size: 2.8rem; font-weight: 800; letter-spacing: -1.5px; color: #ffffff;">
-            📋 <span style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Shortlisted Candidates</span>
-        </h2>
-    </div>
-    <style>
-        /* Custom Styling for Results Expanders */
-        [data-testid="stExpander"], [data-testid="stExpander"] > div, [data-testid="stExpander"] details {
-            background-color: transparent !important;
-            background: transparent !important;
-            border: none !important;
-        }
-
-        /* Target the clickable header (summary) */
-        .streamlit-expanderHeader, 
-        [data-testid="stExpander"] summary {
-            background: var(--result-bg) !important;
-            border: 1px solid rgba(99, 102, 241, 0.3) !important;
-            border-radius: 12px !important;
-            padding: 18px 24px !important;
-            margin-bottom: 12px !important;
-            transition: all 0.3s ease !important;
-            color: #ffffff !important;
-        }
-
-        .streamlit-expanderHeader p {
-            background: linear-gradient(135deg, #818cf8 0%, #c084fc 100%) !important;
-            -webkit-background-clip: text !important;
-            -webkit-text-fill-color: transparent !important;
-            font-weight: 700 !important;
-            font-size: 1.1rem !important;
-        }
-        
-        /* Active/Hover/Open State */
-        .streamlit-expanderHeader:hover, 
-        [data-testid="stExpander"] summary:hover,
-        [data-testid="stExpander"] details[open] > summary {
-            border-color: #6366f1 !important;
-            background: var(--result-hover-bg) !important;
-            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.4) !important;
-        }
-        
-        /* Remove the background from the expanded content area */
-        .streamlit-expanderContent {
-            background: transparent !important;
-            border: none !important;
-            color: #94a3b8 !important;
-            padding: 20px 25px !important;
-        }
-
-        /* Email Preview Box - Ultra Professional Spacing */
-        .email-preview-box {
-            background: #0a0a0f !important;
-            border: 1px solid rgba(255, 255, 255, 0.05) !important;
-            border-radius: 16px !important;
-            padding: 30px !important;
-            color: #e2e8f0 !important; /* Brighter white-grey for clarity */
-            font-family: 'Inter', -apple-system, sans-serif !important;
-            font-size: 1rem !important;
-            line-height: 1.8 !important;   /* Professional line spacing */
-            letter-spacing: 0.3px !important; /* Professional character spacing */
-            margin: 20px 0 !important;
-            white-space: pre-wrap;
-            box-shadow: inset 0 2px 10px rgba(0,0,0,0.5) !important;
-        }
-    </style>
-    """, unsafe_allow_html=True)
-
-    for candidate in display_candidates:
-        with st.expander(f"👤 {candidate['candidate']} | Score: {candidate['score']}"):
-
-            if override and target_email:
-                st.markdown(f"**Original Email:** {candidate.get('original_email')}")
-                st.markdown(f"**Sending To:** {candidate['email']}")
+        # ============================================
+        # PROCESSING LOGIC (Executed if button clicked)
+        # ============================================
+        if process_clicked:
+            if not job_description.strip():
+                st.error("❌ Job description is required.")
+               
+            elif not uploaded_files:
+                st.error("❌ Please upload at least one resume.")
+                
             else:
-                st.markdown(f"**Email:** {candidate['email']}")
+                # ----------------------------------------
+                # SAVE & READ RESUMES
+                # ----------------------------------------
+                resume_texts = []
 
-            quiz_url = f"https://ai-recruiter-859z6bd6jfqfxufktu79e9.streamlit.app/?token={candidate['quiz_token']}"
+                with st.spinner("📄 Reading resumes..."):
+                    for file in uploaded_files:
+                        file_path = os.path.join(UPLOAD_DIR, file.name)
+                        with open(file_path, "wb") as f:
+                            f.write(file.read())
 
-            st.markdown(f"**🔐 Password:** `{candidate['password']}`")
-            st.markdown(f"**📝 Quiz Link:** {quiz_url}")
+                        resume_texts.append(extract_text_from_pdf(file_path))
 
-            subject, body = show_second_round_email(candidate)
+                # ----------------------------------------
+                # BACKEND: EMAIL EXTRACTION
+                # ----------------------------------------
+                with st.spinner("📧 Extracting emails from resumes..."):
+                    processed_resumes = process_uploaded_resumes(resume_texts)
+
+                # ----------------------------------------
+                # LLM: RANKING
+                # ----------------------------------------
+                with st.spinner("🧠 AI is ranking candidates..."):
+                    ai_output = rank_resumes(
+                        job_description=job_description,
+                        candidates=processed_resumes
+                    )
+
+                # ----------------------------------------
+                # BACKEND: SHORTLIST
+                # ----------------------------------------
+                with st.spinner("🎯 Selecting top candidates..."):
+                    shortlisted = select_top_candidates(
+                        ai_output=ai_output,
+                        min_candidates=min_candidates
+                    )
+
+                # ----------------------------------------
+                # STORE IN MONGODB
+                # ----------------------------------------
+                with st.spinner("💾 Storing shortlisted candidates in MongoDB..."):
+                    stored_candidates = store_shortlisted_candidates(shortlisted)
+
+                st.session_state["stored_candidates"] = stored_candidates
+                st.success("✅ Candidates shortlisted and stored!")
+
+        # ============================================
+        # DISPLAY SHORTLISTED CANDIDATES (Full Width below columns)
+        # ============================================
+        if "stored_candidates" in st.session_state:
+            st.write("")  # Spacer
+            
+            candidates = st.session_state["stored_candidates"]
+
+            # ---------- DEBUG MODE ----------
+            with st.sidebar:
+                st.header("🛠️ Debug Mode")
+                target_email = st.text_input("Override email (testing)")
+                override = st.checkbox("Enable override")
+
+            display_candidates = []
+
+            for c in candidates:
+                c_copy = copy.deepcopy(c)
+                if override and target_email:
+                    c_copy["original_email"] = c_copy["email"]
+                    c_copy["email"] = target_email
+                display_candidates.append(c_copy)
 
             st.markdown("""
-            <h3 style="color: #ffffff; font-size: 1.2rem; margin-top: 30px; font-weight: 700; display: flex; align-items: center; gap: 10px;">
-                📨 <span style="letter-spacing: 0.5px;">Email Preview</span>
-            </h3>
+            <div style="text-align: center; margin-bottom: 40px;">
+                <h2 style="font-family: 'Poppins', sans-serif; font-size: 2.8rem; font-weight: 800; letter-spacing: -1.5px; color: #ffffff;">
+                    📋 <span style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Shortlisted Candidates</span>
+                </h2>
+            </div>
+            <style>
+                /* Custom Styling for Results Expanders */
+                [data-testid="stExpander"], [data-testid="stExpander"] > div, [data-testid="stExpander"] details {
+                    background-color: transparent !important;
+                    background: transparent !important;
+                    border: none !important;
+                }
+
+                /* Target the clickable header (summary) */
+                .streamlit-expanderHeader, 
+                [data-testid="stExpander"] summary {
+                    background: var(--result-bg) !important;
+                    border: 1px solid rgba(99, 102, 241, 0.3) !important;
+                    border-radius: 12px !important;
+                    padding: 18px 24px !important;
+                    margin-bottom: 12px !important;
+                    transition: all 0.3s ease !important;
+                    color: #ffffff !important;
+                }
+
+                .streamlit-expanderHeader p {
+                    background: linear-gradient(135deg, #818cf8 0%, #c084fc 100%) !important;
+                    -webkit-background-clip: text !important;
+                    -webkit-text-fill-color: transparent !important;
+                    font-weight: 700 !important;
+                    font-size: 1.1rem !important;
+                }
+                
+                /* Active/Hover/Open State */
+                .streamlit-expanderHeader:hover, 
+                [data-testid="stExpander"] summary:hover,
+                [data-testid="stExpander"] details[open] > summary {
+                    border-color: #6366f1 !important;
+                    background: var(--result-hover-bg) !important;
+                    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.4) !important;
+                }
+                
+                /* Remove the background from the expanded content area */
+                .streamlit-expanderContent {
+                    background: transparent !important;
+                    border: none !important;
+                    color: #94a3b8 !important;
+                    padding: 20px 25px !important;
+                }
+
+                /* Email Preview Box - Ultra Professional Spacing */
+                .email-preview-box {
+                    background: #0a0a0f !important;
+                    border: 1px solid rgba(255, 255, 255, 0.05) !important;
+                    border-radius: 16px !important;
+                    padding: 30px !important;
+                    color: #e2e8f0 !important; /* Brighter white-grey for clarity */
+                    font-family: 'Inter', -apple-system, sans-serif !important;
+                    font-size: 1rem !important;
+                    line-height: 1.8 !important;   /* Professional line spacing */
+                    letter-spacing: 0.3px !important; /* Professional character spacing */
+                    margin: 20px 0 !important;
+                    white-space: pre-wrap;
+                    box-shadow: inset 0 2px 10px rgba(0,0,0,0.5) !important;
+                }
+            </style>
             """, unsafe_allow_html=True)
-            
-            st.markdown(f'<div class="email-preview-box">{body}</div>', unsafe_allow_html=True)
 
-            # Custom styled button for sending email
-            col_btn, _ = st.columns([1.5, 2])
-            with col_btn:
-                if st.button(
-                    f"📨 Send Official Email",
-                    key=f"send_{candidate['quiz_token']}",
-                    use_container_width=True
-                ):
-                    with st.spinner("Dispatching email..."):
-                        success, message = send_email(
-                            to_email=candidate["email"],
-                            subject=subject,
-                            body=body
-                        )
+            for candidate in display_candidates:
+                with st.expander(f"👤 {candidate['candidate']} | Score: {candidate['score']}"):
 
-                        if success:
-                            st.success("✅ Email sent successfully")
-                        else:
-                            st.error(f"❌ {message}")
-    
-    # st.markdown('</div>', unsafe_allow_html=True)  # Close form-card
+                    quiz_url = f"https://ai-recruiter-859z6bd6jfqfxufktu79e9.streamlit.app/?token={candidate['quiz_token']}"
+                    
+                    email_display = candidate['email']
+                    if override and target_email:
+                        email_display = f"{target_email} <span style='color: #64748b; font-size: 0.8rem;'>(Original: {candidate.get('original_email')})</span>"
+
+                    st.markdown(f"""
+                    <div style="background: rgba(255,255,255,0.02); border-radius: 12px; padding: 20px; border: 1px solid rgba(255,255,255,0.05); margin-bottom: 20px;">
+                        <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 1.2rem;">📧</span>
+                            <span style="font-weight: 600; color: #ffffff;">Email:</span>
+                            <span style="color: #94a3b8;">{email_display}</span>
+                        </div>
+                        <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 1.2rem;">🔐</span>
+                            <span style="font-weight: 600; color: #ffffff;">Password:</span>
+                            <code style="background: rgba(99, 102, 241, 0.1); color: #818cf8; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(99, 102, 241, 0.2);">{candidate['password']}</code>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 1.2rem;">📝</span>
+                            <span style="font-weight: 600; color: #ffffff;">Quiz Link:</span>
+                            <a href="{quiz_url}" target="_blank" style="color: #6366f1; text-decoration: none; border-bottom: 1px dashed #6366f1; transition: all 0.3s ease;">{quiz_url}</a>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    subject, body = show_second_round_email(candidate)
+
+                    st.markdown("""
+                    <h3 style="color: #ffffff; font-size: 1.2rem; margin-top: 30px; font-weight: 700; display: flex; align-items: center; gap: 10px;">
+                        📨 <span style="letter-spacing: 0.5px;">Email Preview</span>
+                    </h3>
+                    """, unsafe_allow_html=True)
+                    
+                    st.markdown(f'<div class="email-preview-box">{body}</div>', unsafe_allow_html=True)
+
+                    # Custom styled button for sending email
+                    col_btn, _ = st.columns([1.5, 2])
+                    with col_btn:
+                        if st.button(
+                            f"📨 Send Official Email",
+                            key=f"send_{candidate['quiz_token']}",
+                            use_container_width=True
+                        ):
+                            with st.spinner("Dispatching email..."):
+                                success, message = send_email(
+                                    to_email=candidate["email"],
+                                    subject=subject,
+                                    body=body
+                                )
+
+                                if success:
+                                    st.success("✅ Email sent successfully")
+                                else:
+                                    st.error(f"❌ {message}")
 
 st.markdown('</div>', unsafe_allow_html=True)  # Close main-content-wrapper
 

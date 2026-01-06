@@ -14,3 +14,4 @@ db = client[DB_NAME]
 
 candidates_collection = db["candidates"]
 assets_collection = db["assets"]
+recruiters_collection = db["recruiters"]
