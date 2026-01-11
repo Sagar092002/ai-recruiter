@@ -4,8 +4,8 @@ import secrets
 import string
 from app.db import candidates_collection
 
-QUIZ_BASE_URL = "https://ai-recruiter-859z6bd6jfqfxufktu79e9.streamlit.app/?token="
-
+# QUIZ_BASE_URL = "https://ai-recruiter-859z6bd6jfqfxufktu79e9.streamlit.app/?token="
+QUIZ_BASE_URL = "http://localhost:8501/?token="
 EMAIL_REGEX = r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+"
 
 
@@ -54,7 +54,7 @@ def generate_token():
     return secrets.token_urlsafe(16)
 
 
-def store_shortlisted_candidates(candidates):
+def store_shortlisted_candidates(candidates, recruiter_email=None):
     stored = []
 
     for c in candidates:
@@ -68,7 +68,8 @@ def store_shortlisted_candidates(candidates):
             "password": password,
             "quiz_token": token,
             "quiz_link": f"{QUIZ_BASE_URL}{token}",
-            "status": "SHORTLISTED"
+            "status": "SHORTLISTED",
+            "recruiter_email": recruiter_email
         }
 
         candidates_collection.insert_one(record)
