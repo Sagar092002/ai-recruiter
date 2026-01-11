@@ -1433,6 +1433,14 @@ background-image: linear-gradient(90deg, #050505 0%, rgba(5, 5, 5, 0.7) 50%, tra
             </div>
         """, unsafe_allow_html=True)
     else:
+        # Move Sidebar Debug Widgets OUTSIDE the fragment to prevent DuplicateWidgetID on fragment rerun
+        with st.sidebar:
+            st.header("🛠️ Debug Mode")
+            # Use specific keys so we can read them from session_state if needed, 
+            # though variables `target_email` and `override` will be captured by the closure.
+            target_email = st.text_input("Override email (testing)", key="debug_email_override")
+            override = st.checkbox("Enable override", key="debug_override_checkbox")
+
         # Define the Engine Fragment to prevent full-page blinking on widget interaction
         @st.fragment
         def recruiter_engine():
@@ -1498,167 +1506,164 @@ background-image: linear-gradient(90deg, #050505 0%, rgba(5, 5, 5, 0.7) 50%, tra
                     st.success("✅ Candidates shortlisted!")
                     st.rerun()
 
+            # ============================================
+            # DISPLAY SHORTLISTED CANDIDATES (Moved inside Fragment for persistent state)
+            # ============================================
+            if "stored_candidates" not in st.session_state:
+                # Recovery: Try to fetch latest shortlisted candidates for this recruiter
+                # Note: is_recruiter is implicitly True here as we are in the else block
+                current_rec_email = st.session_state.get("recruiter_email")
+                db_candidates = list(candidates_collection.find({"recruiter_email": current_rec_email, "status": "SHORTLISTED"}))
+                if db_candidates:
+                    st.session_state["stored_candidates"] = db_candidates
+
+            if "stored_candidates" in st.session_state:
+                st.write("")  # Spacer
+                
+                candidates = st.session_state["stored_candidates"]
+
+                # Note: Sidebar elements inside a fragment might behave oddly if not managed carefully.
+                # We have moved them outside to avoid DuplicateWidgetID errors.
+
+                display_candidates = []
+
+                for c in candidates:
+                    c_copy = copy.deepcopy(c)
+                    if override and target_email:
+                        c_copy["original_email"] = c_copy["email"]
+                        c_copy["email"] = target_email
+                    display_candidates.append(c_copy)
+
+                st.markdown("""
+                <div style="text-align: center; margin-bottom: 40px;">
+                    <h2 style="font-family: 'Poppins', sans-serif; font-size: 2.8rem; font-weight: 800; letter-spacing: -1.5px; color: #ffffff;">
+                        📋 <span style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Shortlisted Candidates</span>
+                    </h2>
+                </div>
+                <style>
+                    /* Custom Styling for Results Expanders */
+                    [data-testid="stExpander"], [data-testid="stExpander"] > div, [data-testid="stExpander"] details {
+                        background-color: transparent !important;
+                        background: transparent !important;
+                        border: none !important;
+                    }
+
+                    /* Target the clickable header (summary) */
+                    .streamlit-expanderHeader, 
+                    [data-testid="stExpander"] summary {
+                        background: var(--result-bg) !important;
+                        border: 1px solid rgba(99, 102, 241, 0.3) !important;
+                        border-radius: 12px !important;
+                        padding: 18px 24px !important;
+                        margin-bottom: 12px !important;
+                        transition: all 0.3s ease !important;
+                        color: #ffffff !important;
+                    }
+
+                    .streamlit-expanderHeader p {
+                        background: linear-gradient(135deg, #818cf8 0%, #c084fc 100%) !important;
+                        -webkit-background-clip: text !important;
+                        -webkit-text-fill-color: transparent !important;
+                        font-weight: 700 !important;
+                        font-size: 1.1rem !important;
+                    }
+                    
+                    /* Active/Hover/Open State */
+                    .streamlit-expanderHeader:hover, 
+                    [data-testid="stExpander"] summary:hover,
+                    [data-testid="stExpander"] details[open] > summary {
+                        border-color: #6366f1 !important;
+                        background: var(--result-hover-bg) !important;
+                        box-shadow: 0 5px 20px rgba(0, 0, 0, 0.4) !important;
+                    }
+                    
+                    /* Remove the background from the expanded content area */
+                    .streamlit-expanderContent {
+                        background: transparent !important;
+                        border: none !important;
+                        color: #94a3b8 !important;
+                        padding: 20px 25px !important;
+                    }
+
+                    /* Email Preview Box - Ultra Professional Spacing */
+                    .email-preview-box {
+                        background: #0a0a0f !important;
+                        border: 1px solid rgba(255, 255, 255, 0.05) !important;
+                        border-radius: 16px !important;
+                        padding: 30px !important;
+                        color: #e2e8f0 !important; /* Brighter white-grey for clarity */
+                        font-family: 'Inter', -apple-system, sans-serif !important;
+                        font-size: 1rem !important;
+                        line-height: 1.8 !important;   /* Professional line spacing */
+                        letter-spacing: 0.3px !important; /* Professional character spacing */
+                        margin: 20px 0 !important;
+                        white-space: pre-wrap;
+                        box-shadow: inset 0 2px 10px rgba(0,0,0,0.5) !important;
+                    }
+                </style>
+                """, unsafe_allow_html=True)
+
+                for candidate in display_candidates:
+                    with st.expander(f"👤 {candidate['candidate']} | Score: {candidate['score']}"):
+
+                        quiz_url = f"https://ai-recruiter-859z6bd6jfqfxufktu79e9.streamlit.app/?token={candidate['quiz_token']}"
+                        
+                        email_display = candidate['email']
+                        if override and target_email:
+                            email_display = f"{target_email} <span style='color: #64748b; font-size: 0.8rem;'>(Original: {candidate.get('original_email')})</span>"
+
+                        st.markdown(f"""<div style="background: rgba(255,255,255,0.02); border-radius: 12px; padding: 20px; border: 1px solid rgba(255,255,255,0.05); margin-bottom: 20px;">
+    <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
+    <span style="font-size: 1.2rem;">📧</span>
+    <span style="font-weight: 600; color: #ffffff;">Email:</span>
+    <span style="color: #94a3b8;">{email_display}</span>
+    </div>
+    <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
+    <span style="font-size: 1.2rem;">🔐</span>
+    <span style="font-weight: 600; color: #ffffff;">Password:</span>
+    <code style="background: rgba(99, 102, 241, 0.1); color: #818cf8; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(99, 102, 241, 0.2);">{candidate['password']}</code>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px;">
+    <span style="font-size: 1.2rem;">📝</span>
+    <span style="font-weight: 600; color: #ffffff;">Quiz Link:</span>
+    <a href="{quiz_url}" target="_blank" style="color: #6366f1; text-decoration: none; border-bottom: 1px dashed #6366f1; transition: all 0.3s ease;">{quiz_url}</a>
+    </div>
+    </div>""", unsafe_allow_html=True)
+
+                        subject, body = show_second_round_email(candidate)
+
+                        st.markdown("""
+                        <h3 style="color: #ffffff; font-size: 1.2rem; margin-top: 30px; font-weight: 700; display: flex; align-items: center; gap: 10px;">
+                            📨 <span style="letter-spacing: 0.5px;">Email Preview</span>
+                        </h3>
+                        """, unsafe_allow_html=True)
+                        
+                        st.markdown(f'<div class="email-preview-box">{body}</div>', unsafe_allow_html=True)
+
+                        # Custom styled button for sending email
+                        col_btn, _ = st.columns([1.5, 2])
+                        with col_btn:
+                            if st.button(
+                                f"📨 Send Official Email",
+                                key=f"send_{candidate['quiz_token']}",
+                                use_container_width=True
+                            ):
+                                with st.spinner("Dispatching email..."):
+                                    success, message = send_email(
+                                        to_email=candidate["email"],
+                                        subject=subject,
+                                        body=body
+                                    )
+
+                                    if success:
+                                        st.success("✅ Email sent successfully")
+                                    else:
+                                        st.error(f"❌ {message}")
+
         # Run the fragment
         recruiter_engine()
 
         st.markdown('</div>', unsafe_allow_html=True) # Close form-section
-
-        # ============================================
-        # DISPLAY SHORTLISTED CANDIDATES (Full Width below columns)
-        # ============================================
-        if "stored_candidates" not in st.session_state and is_recruiter:
-            # Recovery: Try to fetch latest shortlisted candidates for this recruiter
-            db_candidates = list(candidates_collection.find({"recruiter_email": st.session_state.get("recruiter_email"), "status": "SHORTLISTED"}))
-            if db_candidates:
-                st.session_state["stored_candidates"] = db_candidates
-
-        if "stored_candidates" in st.session_state:
-            st.write("")  # Spacer
-            
-            candidates = st.session_state["stored_candidates"]
-
-            # ---------- DEBUG MODE ----------
-            with st.sidebar:
-                st.header("🛠️ Debug Mode")
-                target_email = st.text_input("Override email (testing)")
-                override = st.checkbox("Enable override")
-
-            display_candidates = []
-
-            for c in candidates:
-                c_copy = copy.deepcopy(c)
-                if override and target_email:
-                    c_copy["original_email"] = c_copy["email"]
-                    c_copy["email"] = target_email
-                display_candidates.append(c_copy)
-
-            st.markdown("""
-            <div style="text-align: center; margin-bottom: 40px;">
-                <h2 style="font-family: 'Poppins', sans-serif; font-size: 2.8rem; font-weight: 800; letter-spacing: -1.5px; color: #ffffff;">
-                    📋 <span style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Shortlisted Candidates</span>
-                </h2>
-            </div>
-            <style>
-                /* Custom Styling for Results Expanders */
-                [data-testid="stExpander"], [data-testid="stExpander"] > div, [data-testid="stExpander"] details {
-                    background-color: transparent !important;
-                    background: transparent !important;
-                    border: none !important;
-                }
-
-                /* Target the clickable header (summary) */
-                .streamlit-expanderHeader, 
-                [data-testid="stExpander"] summary {
-                    background: var(--result-bg) !important;
-                    border: 1px solid rgba(99, 102, 241, 0.3) !important;
-                    border-radius: 12px !important;
-                    padding: 18px 24px !important;
-                    margin-bottom: 12px !important;
-                    transition: all 0.3s ease !important;
-                    color: #ffffff !important;
-                }
-
-                .streamlit-expanderHeader p {
-                    background: linear-gradient(135deg, #818cf8 0%, #c084fc 100%) !important;
-                    -webkit-background-clip: text !important;
-                    -webkit-text-fill-color: transparent !important;
-                    font-weight: 700 !important;
-                    font-size: 1.1rem !important;
-                }
-                
-                /* Active/Hover/Open State */
-                .streamlit-expanderHeader:hover, 
-                [data-testid="stExpander"] summary:hover,
-                [data-testid="stExpander"] details[open] > summary {
-                    border-color: #6366f1 !important;
-                    background: var(--result-hover-bg) !important;
-                    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.4) !important;
-                }
-                
-                /* Remove the background from the expanded content area */
-                .streamlit-expanderContent {
-                    background: transparent !important;
-                    border: none !important;
-                    color: #94a3b8 !important;
-                    padding: 20px 25px !important;
-                }
-
-                /* Email Preview Box - Ultra Professional Spacing */
-                .email-preview-box {
-                    background: #0a0a0f !important;
-                    border: 1px solid rgba(255, 255, 255, 0.05) !important;
-                    border-radius: 16px !important;
-                    padding: 30px !important;
-                    color: #e2e8f0 !important; /* Brighter white-grey for clarity */
-                    font-family: 'Inter', -apple-system, sans-serif !important;
-                    font-size: 1rem !important;
-                    line-height: 1.8 !important;   /* Professional line spacing */
-                    letter-spacing: 0.3px !important; /* Professional character spacing */
-                    margin: 20px 0 !important;
-                    white-space: pre-wrap;
-                    box-shadow: inset 0 2px 10px rgba(0,0,0,0.5) !important;
-                }
-            </style>
-            """, unsafe_allow_html=True)
-
-            for candidate in display_candidates:
-                with st.expander(f"👤 {candidate['candidate']} | Score: {candidate['score']}"):
-
-                    quiz_url = f"https://ai-recruiter-859z6bd6jfqfxufktu79e9.streamlit.app/?token={candidate['quiz_token']}"
-                    
-                    email_display = candidate['email']
-                    if override and target_email:
-                        email_display = f"{target_email} <span style='color: #64748b; font-size: 0.8rem;'>(Original: {candidate.get('original_email')})</span>"
-
-                    st.markdown(f"""<div style="background: rgba(255,255,255,0.02); border-radius: 12px; padding: 20px; border: 1px solid rgba(255,255,255,0.05); margin-bottom: 20px;">
-<div style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
-<span style="font-size: 1.2rem;">📧</span>
-<span style="font-weight: 600; color: #ffffff;">Email:</span>
-<span style="color: #94a3b8;">{email_display}</span>
-</div>
-<div style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
-<span style="font-size: 1.2rem;">🔐</span>
-<span style="font-weight: 600; color: #ffffff;">Password:</span>
-<code style="background: rgba(99, 102, 241, 0.1); color: #818cf8; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(99, 102, 241, 0.2);">{candidate['password']}</code>
-</div>
-<div style="display: flex; align-items: center; gap: 10px;">
-<span style="font-size: 1.2rem;">📝</span>
-<span style="font-weight: 600; color: #ffffff;">Quiz Link:</span>
-<a href="{quiz_url}" target="_blank" style="color: #6366f1; text-decoration: none; border-bottom: 1px dashed #6366f1; transition: all 0.3s ease;">{quiz_url}</a>
-</div>
-</div>""", unsafe_allow_html=True)
-
-                    subject, body = show_second_round_email(candidate)
-
-                    st.markdown("""
-                    <h3 style="color: #ffffff; font-size: 1.2rem; margin-top: 30px; font-weight: 700; display: flex; align-items: center; gap: 10px;">
-                        📨 <span style="letter-spacing: 0.5px;">Email Preview</span>
-                    </h3>
-                    """, unsafe_allow_html=True)
-                    
-                    st.markdown(f'<div class="email-preview-box">{body}</div>', unsafe_allow_html=True)
-
-                    # Custom styled button for sending email
-                    col_btn, _ = st.columns([1.5, 2])
-                    with col_btn:
-                        if st.button(
-                            f"📨 Send Official Email",
-                            key=f"send_{candidate['quiz_token']}",
-                            use_container_width=True
-                        ):
-                            with st.spinner("Dispatching email..."):
-                                success, message = send_email(
-                                    to_email=candidate["email"],
-                                    subject=subject,
-                                    body=body
-                                )
-
-                                if success:
-                                    st.success("✅ Email sent successfully")
-                                else:
-                                    st.error(f"❌ {message}")
-
-st.markdown('</div>', unsafe_allow_html=True)  # Close main-content-wrapper
 
 # # End of Streamlit App
 
